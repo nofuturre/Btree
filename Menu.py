@@ -60,6 +60,10 @@ class Menu:
                     key = int(line.split(" ")[1])
                     print(f"\n\tPrint {key}. record's data")
                     self.tree.print_record(key)
+                elif instruction == 'd':
+                    key = int(line.split(" ")[1])
+                    print(f"\n\tDelete record: {key}")
+                    self.tree.delete(key)
                 if self.verbose:
                     self.tree.print_tree(self.tree.root)
 
