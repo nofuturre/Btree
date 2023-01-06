@@ -3,9 +3,9 @@ from math import floor
 from BTreeNode import BTreeNode
 
 
-def find_pointer(page, record):
+def find_pointer(page, key):
     i = len(page.records) - 1
-    while i >= 0 and record.key < page.records[i].key:
+    while i >= 0 and key <= page.records[i].key:
         i -= 1
     return i + 1
 
@@ -20,10 +20,10 @@ class BTree:
             print("\nKey already in the tree")
             return
 
-        if record.key == 5:
-            pass
-
         self.insert_leaf(self.root, record)
+
+        if record.key == 63:
+            pass
 
     def delete(self, key):
         if self.search_key(key) is None:
@@ -41,7 +41,7 @@ class BTree:
                 page.records.sort(key=lambda x: x.key)
             return
 
-        i = find_pointer(page, record)
+        i = find_pointer(page, record.key)
         if page.pointers[i].leaf:
             if len(page.pointers[i].records) >= (2 * self.d):
                 if self.find_non_full_sibling(page, i) is not None:
@@ -60,9 +60,10 @@ class BTree:
             return
 
         else:
-            if self.find_non_full_sibling(page, i) is not None:
-                self.compensate(page, i, True, record)
-                return
+            if page.parent is not None:
+                if self.find_non_full_sibling(page.parent, i) is not None:
+                    self.compensate(page.parent, i, True, record)
+                    return
             else:
                 self.split(page, i, record)
                 return
@@ -78,13 +79,13 @@ class BTree:
             tmp1.records = tmp.records[self.d + 1:]
             tmp2.records = tmp.records[0: self.d]
             tmp1.pointers = tmp.pointers[self.d + 1:]
-            tmp2.pointers = tmp.pointers[0: self.d]
+            tmp2.pointers = tmp.pointers[0: self.d + 1]
             tmp1.parent = page
             tmp2.parent = page
 
             page.leaf = False
             page.pointers = [tmp2, tmp1]
-            page.records = [tmp.records[floor(len(tmp.records) / 2)]]
+            page.records = [tmp.records[self.d]]
         else:
             tmp = page
             z = BTreeNode(tmp.leaf)
@@ -108,7 +109,9 @@ class BTree:
             sibling = self.find_non_underflow_sibling(page, i)
         record = lambda x: page.records[i] if i < x else page.records[sibling]
 
-        r = page.pointers[i].records + [record(sibling)] + page.pointers[sibling].records + [new]
+        r = page.pointers[i].records + [record(sibling)] + page.pointers[sibling].records
+        if new is not None:
+            r.append(new)
         r.sort(key=lambda x: x.key)
 
         middle = floor(len(r) / 2)
@@ -131,30 +134,34 @@ class BTree:
                 page.pointers[i].records = r[floor(len(p) / 2):]
 
     def merge(self, page, i, k):
-        if len(page.pointers[i + 1].records) == self.d:
+        if i + 1 < len(page.pointers) and len(page.pointers[i + 1].records) == self.d:
             sibling = i + 1
-        elif len(page.pointers[i - 1].records) == self.d:
+        elif i > 0 and len(page.pointers[i - 1].records) == self.d:
             sibling = i - 1
         else:
             return False
 
         record = lambda x: page.records[i] if i < x else page.records[sibling]
 
-        r = page.pointers[i].records + [record(sibling)] + page.pointers[sibling].records
-
-        page.pointers[i].records = r
-        if not page.pointers[i].leaf:
+        if sibling > i:
+            r = page.pointers[i].records + [record(sibling)] + page.pointers[sibling].records
             p = page.pointers[i].pointers + page.pointers[sibling].pointers
+        else:
+            r = page.pointers[sibling].records + [record(sibling)] + page.pointers[i].records
+            p = page.pointers[sibling].pointers + page.pointers[i].pointers
+
+        page.pointers[i].records = [rec for rec in r if rec.key != k]
+        if not page.pointers[i].leaf:
             page.pointers[i].pointers = p
 
         if page.parent is None and len(page.records) == 1:
-            page.pointers = []
+            page.pointers = page.pointers[i].pointers
             page.records = [rec for rec in r if rec.key != k]
-            page.leaf = True
+            page.leaf = len(page.pointers) == 0
             return False
         else:
-            page.pointers.remove(sibling)
-            page.delete_key(record(sibling).key)
+            page.pointers.pop(sibling)
+            self.remove_key(page, record(sibling).key)
             return True
 
     def print_tree(self, x, l=0, p=True):
@@ -163,15 +170,14 @@ class BTree:
         print("*", end=" ")
         for i in x.records:
             print(f"{i.key} *", end=" ")
-        print("\t", end="")
+        print("\n", end="")
         l += 1
         if len(x.pointers) > 0:
             for i in x.pointers:
-                if i == x.pointers[0]:
+                if i == x.pointers[0] or not i.leaf:
                     self.print_tree(i, l, True)
                 else:
                     self.print_tree(i, l, False)
-        print()
 
     def update(self, x):
         if len(x.pointers) > 0:
@@ -194,42 +200,75 @@ class BTree:
         else:
             return self.search_key(k, self.root)
 
-    def delete_key(self, k, x=None):
+    def delete_key(self, k, page=None):
         self.update(self.root)
 
-        if x is not None:
-            i = 0
-            while i < len(x.records) and k > x.records[i].key:
-                i += 1
-            if i < len(x.records) and k == x.records[i].key and x.leaf:
-                if len(x.records) <= self.d:
-                    if self.find_non_underflow_sibling(x.parent, i) is not None:
-                        self.compensate(x.parent, i, False)
-                    else:
-                        if not self.merge(x.parent, i, k):
-                            return
-                x.records = [record for record in x.records if record.key != k]
-                return True
-            elif i < len(x.records) and k == x.records[i].key:
-                tmp = self.find_key(x.pointers[i], "max")
-                if tmp is None:
-                    tmp = self.find_key(x.pointers[i+1], "min")
-                    if tmp is None:
-                        return False
-                if self.delete_key(tmp.key):
-                    x.records.pop(i)
-                    x.records.insert(i, tmp)
+        if page == self.root and page.on_page(k):
+            return self.delete_from_root(page, k)
+
+        if page is not None:
+            i = find_pointer(page, k)
+            if page.pointers[i].on_page(k):
+                if page.pointers[i].leaf:
+                    if len(page.pointers[i].records) <= self.d:
+                        if self.find_non_underflow_sibling(page, i) is not None:
+                            self.compensate(page, i, False)
+                        else:
+                            if not self.merge(page, i, k):
+                                return
+                    page.pointers[i].records = [record for record in page.pointers[i].records if record.key != k]
                     return True
                 else:
-                    return False
-
-            elif x.leaf:
-                return False
+                    root = page.pointers[i]
+                    j = find_pointer(root, k)
+                    if j > 0:
+                        tmp = self.find_key(root.pointers[j], "max")
+                    else:
+                        tmp = None
+                    if tmp is None:
+                        tmp = self.find_key(root.pointers[j + 1], "min")
+                        if tmp is None:
+                            return False
+                    if self.delete_key(tmp.key):
+                        root.records[j] = tmp
+                        return True
+                    else:
+                        return False
             else:
-                return self.delete_key(k, x.pointers[i])
-
+                return self.delete_key(k, page.pointers[i])
         else:
             return self.delete_key(k, self.root)
+
+    def delete_from_root(self, page, k):
+        if len(page.pointers) == 0:
+            page.records = [record for record in page.records if record.key != k]
+        else:
+            j = find_pointer(page, k)
+            tmp = self.find_key(page.pointers[j], "max")
+
+            if tmp is None:
+                tmp = self.find_key(page.pointers[j + 1], "min")
+                if tmp is None:
+                    return False
+            if self.delete_key(tmp.key):
+                page.records[j] = tmp
+                return True
+            else:
+                return False
+
+    def remove_key(self, page, k):
+        if page.parent is not None:
+            i = find_pointer(page.parent, k)
+            if len(page.records) <= self.d:
+                if self.find_non_underflow_sibling(page.parent, i) is not None:
+                    self.compensate(page.parent, i, False)
+                else:
+                    if not self.merge(page.parent, i, k):
+                        return
+            page.pointers[i].records = [record for record in page.pointers[i].records if record.key != k]
+            return True
+        else:
+            page.records = [record for record in page.records if record.key != k]
 
     def print_record(self, key):
         record = self.search_key(key)
@@ -258,12 +297,12 @@ class BTree:
         try:
             l1 = page.pointers[i + 1].underflow(self.d)
         except IndexError:
-            l1 = False
+            l1 = True
 
         try:
             l2 = page.pointers[i - 1].underflow(self.d)
         except IndexError:
-            l2 = False
+            l2 = True
 
         if not l1:
             return i + 1

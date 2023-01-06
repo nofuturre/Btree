@@ -18,3 +18,9 @@ class BTreeNode:
             return True
         else:
             return False
+
+    def on_page(self, key):
+        for record in self.records:
+            if record.key == key:
+                return True
+        return False
